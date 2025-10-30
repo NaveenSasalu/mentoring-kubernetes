@@ -8,9 +8,9 @@ A tiny guide to run a **website locally** (WSL2 + Docker), then on **k3s** in th
 <summary><strong>0) What you’ll create</strong></summary>
 
 - Local site via **Docker** on **WSL2 (Ubuntu)**
-- GitHub repo `name-surname` building an image via Actions → pushed to **Docker Hub**
+- GitHub repo name-surname building an image via Actions → pushed to **Docker Hub**
 - Single-node **k3s** on Hetzner; public HTTPS via **ingress-nginx** + **cert-manager**
-- Domain `{name}{surname}.com` pointing to your server
+- Domain {name}{surname}.com pointing to your server
 </details>
 
 ---
@@ -22,6 +22,7 @@ A tiny guide to run a **website locally** (WSL2 + Docker), then on **k3s** in th
 ```powershell
 wsl --install -d Ubuntu
 ```
+
 Reboot if asked → open **Ubuntu** app → create user → update:
 ```bash
 sudo apt-get update -y && sudo apt-get upgrade -y
@@ -56,8 +57,8 @@ docker run --rm hello-world
 <details>
 <summary><strong>3) Create GitHub repo & minimal website (local)</strong></summary>
 
-- GitHub username: `name-surname` (e.g., `jane-doe`)
-- Repo: `name-surname`
+- GitHub username: name-surname (e.g., jane-doe)
+- Repo: name-surname
 
 **index.html**
 ```html
@@ -118,7 +119,7 @@ In **Repo → Settings → Secrets and variables → Actions**, add:
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN` (Docker Hub access token)
 
-Push to `main` → image appears at:
+Push to main → image appears at:
 ```
 docker.io/<DOCKERHUB_USERNAME>/name-surname:latest
 ```
@@ -129,7 +130,7 @@ docker.io/<DOCKERHUB_USERNAME>/name-surname:latest
 <details>
 <summary><strong>5) Register your domain</strong></summary>
 
-Buy `{name}{surname}.com` (e.g., via GoDaddy).
+Buy {name}{surname}.com (e.g., via GoDaddy).
 You’ll point DNS to your server **after** it’s created.
 </details>
 
@@ -158,7 +159,7 @@ curl -sfL https://get.k3s.io | sh -s - --disable traefik
 # verify
 kubectl get nodes
 ```
-> k3s installs `kubectl` on the server, but we’ll manage the cluster **from your laptop** next.
+> k3s installs kubectl on the server, but we’ll manage the cluster **from your laptop** next.
 </details>
 
 ---
@@ -188,6 +189,32 @@ helm version
 ---
 
 <details>
+<summary><strong>8.1) Install k9s (TUI for Kubernetes)</strong></summary>
+
+A handy terminal UI to explore pods/logs/resources.
+
+**Install (WSL2 Ubuntu):**
+```bash
+# downloads latest Linux amd64 release and puts binary in /usr/local/bin
+curl -sL "https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_amd64.tar.gz" \
+  | sudo tar zx -C /usr/local/bin k9s
+sudo chmod 0755 /usr/local/bin/k9s
+
+# verify
+k9s version
+```
+
+**Quick use:**
+- Launch: `k9s`
+- Change namespace: `:ns <name>` (e.g., `:ns ingress-nginx`)
+- View logs: select a pod → press `l`
+- Describe: `d`
+- Quit: `q`
+</details>
+
+---
+
+<details>
 <summary><strong>9) Configure local kubectl to talk to your k3s</strong></summary>
 
 Copy the k3s kubeconfig **from the server** to your laptop:
@@ -196,23 +223,40 @@ Copy the k3s kubeconfig **from the server** to your laptop:
 scp root@<your-server-ip>:/etc/rancher/k3s/k3s.yaml ./k3s.yaml
 ```
 
-Edit the server address inside `k3s.yaml` to use the **public IP**:
+Edit the server address inside k3s.yaml to use the **public IP**:
 ```bash
 # replace 127.0.0.1 with the server public IP
 sed -i 's/127.0.0.1/<your-server-ip>/g' k3s.yaml
 ```
 
-Use it:
+Use it for the current shell:
 ```bash
 export KUBECONFIG=$PWD/k3s.yaml
 kubectl get nodes
 # should show the k3s node
 ```
+</details>
 
-(Optional) persist:
+---
+
+<details>
+<summary><strong>9.1) Copy kubeconfig to ~/.kube/config (default path)</strong></summary>
+
+Instead of exporting `KUBECONFIG`, place the file where `kubectl` looks by default.
+
 ```bash
-echo 'export KUBECONFIG=$HOME/k3s.yaml' >> ~/.bashrc
-cp k3s.yaml $HOME/k3s.yaml
+# ensure the kube dir exists
+mkdir -p ~/.kube
+
+# (optional) backup any existing config
+[ -f ~/.kube/config ] && cp ~/.kube/config ~/.kube/config.bak.$(date +%Y%m%d%H%M%S)
+
+# copy and lock down permissions
+cp ./k3s.yaml ~/.kube/config
+chmod 600 ~/.kube/config
+
+# test
+kubectl get nodes
 ```
 </details>
 
@@ -226,7 +270,10 @@ Expose ports 80/443 via hostPorts (single-node VM):
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo update
 
-helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx   --namespace ingress-nginx --create-namespace   --set controller.hostPort.enabled=true   --set controller.kind=DaemonSet
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx --create-namespace \
+  --set controller.hostPort.enabled=true \
+  --set controller.kind=DaemonSet
 
 kubectl -n ingress-nginx get pods
 ```
@@ -243,7 +290,8 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/do
 helm repo add jetstack https://charts.jetstack.io
 helm repo update
 
-helm upgrade --install cert-manager jetstack/cert-manager   --namespace cert-manager --create-namespace
+helm upgrade --install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace
 ```
 
 Create a **ClusterIssuer** (replace your email):
@@ -265,6 +313,7 @@ spec:
         ingress:
           class: nginx
 ```
+
 Apply:
 ```bash
 kubectl apply -f cluster-issuer.yaml
@@ -277,8 +326,8 @@ kubectl apply -f cluster-issuer.yaml
 <summary><strong>12) Point your domain to the server</strong></summary>
 
 At your registrar (e.g., GoDaddy), set DNS:
-- `A` record: `@` → `<your-server-ip>`
-- (optional) `A` record: `www` → `<your-server-ip>`
+- A record: `@` → `<your-server-ip>`
+- (optional) A record: `www` → `<your-server-ip>`
 
 Wait a few minutes for propagation.
 </details>
@@ -355,7 +404,7 @@ kubectl get pods,svc,ingress
 <details>
 <summary><strong>Troubleshooting quickies</strong></summary>
 
-- DNS: confirm `A` record points to the server IP
+- DNS: confirm A record points to the server IP
 - Ingress: `kubectl describe ingress web`
 - Nginx: `kubectl -n ingress-nginx get pods`
 - Certs: `kubectl -n cert-manager get challenges,orders,certificates`
@@ -364,6 +413,6 @@ kubectl get pods,svc,ingress
 ---
 
 ## Done 🎉
-- Local dev: **Docker on WSL2** → `http://localhost:8080`
+- Local dev: **Docker on WSL2** → http://localhost:8080
 - CI/CD: **GitHub Actions** → **Docker Hub**
-- Cloud: **k3s** (managed from your laptop with **kubectl** & **Helm**), **ingress-nginx**, **cert-manager** → HTTPS website
+- Cloud: **k3s** (managed from your laptop with **kubectl**, **Helm**, **k9s**), **ingress-nginx**, **cert-manager** → HTTPS website
