@@ -146,7 +146,54 @@ Note the **public IPv4** and ensure **SSH** access.
 ---
 
 <details>
-<summary><strong>7) Install k3s on the server (quick)</strong></summary>
+<summary><strong>6a) (Optional, recommended) Auto-provision with cloud-init</strong></summary>
+
+When creating the server in Hetzner:
+- Add your **SSH key**
+- Paste this into the **User data (cloud-init)** box to auto-install k3s, enable UFW, and set kubeconfig perms
+
+```yaml
+#cloud-config
+package_update: true
+package_upgrade: true
+packages:
+  - curl
+  - ufw
+
+runcmd:
+  # 1) Firewall lockdown
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow 22/tcp      # SSH
+  - ufw allow 80/tcp      # HTTP
+  - ufw allow 443/tcp     # HTTPS
+  - ufw allow 6443/tcp    # K3s API server
+  - ufw --force enable
+
+  # 2) K3s install + kubeconfig perms (multi-line script)
+  - |
+    #!/usr/bin/env bash
+    set -e
+
+    IP="$(hostname -I | awk '{print $1}')"
+    curl -sfL https://get.k3s.io | \
+      INSTALL_K3S_EXEC="server --tls-san ${IP} --disable=traefik" sh -
+
+    chmod 644 /etc/rancher/k3s/k3s.yaml
+```
+
+**Notes**
+- Traefik is disabled (we’ll install **ingress-nginx**).
+- Ports 80/443 (ingress) and 6443 (k8s API) opened.
+- After boot, you can **skip step 7 (manual k3s install)** and jump to **step 8/9** to fetch kubeconfig and manage the cluster from your laptop.
+</details>
+
+---
+
+<details>
+<summary><strong>7) Install k3s on the server (manual)</strong></summary>
+
+> **Skip this if you used step 6a cloud-init** (k3s is already installed).
 
 SSH from your laptop (Windows Terminal/Ubuntu):
 ```bash
@@ -223,6 +270,7 @@ Copy the k3s kubeconfig **from the server** to your laptop:
 scp root@<your-server-ip>:/etc/rancher/k3s/k3s.yaml ./k3s.yaml
 ```
 
+If you used **cloud-init (6a)**, the server cert already includes its IP via `--tls-san`.  
 Edit the server address inside k3s.yaml to use the **public IP**:
 ```bash
 # replace 127.0.0.1 with the server public IP
@@ -240,7 +288,7 @@ kubectl get nodes
 ---
 
 <details>
-<summary><strong>9.1) Copy kubeconfig to ~/.kube/config (default path)</strong></summary>
+<summary><strong>9.1) Copy kubeconfig to ~/.kube/config (default path)</summary>
 
 Instead of exporting `KUBECONFIG`, place the file where `kubectl` looks by default.
 
@@ -408,11 +456,12 @@ kubectl get pods,svc,ingress
 - Ingress: `kubectl describe ingress web`
 - Nginx: `kubectl -n ingress-nginx get pods`
 - Certs: `kubectl -n cert-manager get challenges,orders,certificates`
+- Firewall: `ufw status` (80/443/6443 must be allowed)
 </details>
 
 ---
 
 ## Done 🎉
-- Local dev: **Docker on WSL2** → http://localhost:8080
-- CI/CD: **GitHub Actions** → **Docker Hub**
+- Local dev: **Docker on WSL2** → http://localhost:8080  
+- CI/CD: **GitHub Actions** → **Docker Hub**  
 - Cloud: **k3s** (managed from your laptop with **kubectl**, **Helm**, **k9s**), **ingress-nginx**, **cert-manager** → HTTPS website
