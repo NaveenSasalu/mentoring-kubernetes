@@ -465,3 +465,273 @@ kubectl get pods,svc,ingress
 - Local dev: **Docker on WSL2** → http://localhost:8080  
 - CI/CD: **GitHub Actions** → **Docker Hub**  
 - Cloud: **k3s** (managed from your laptop with **kubectl**, **Helm**, **k9s**), **ingress-nginx**, **cert-manager** → HTTPS website
+
+----
+
+Perfect — let’s do a focused, **practical run-from-12.5** so you can install ArgoCD, connect it to your repo, and have it deploy your app (no domain required). I’ll give you **exact commands**, file examples tuned for a no-domain (HTTP) setup, verification steps, and quick troubleshooting checks. Do these steps in order — they’re safe to stop after any step and resume later.
+
+---
+
+# Quick plan (12.5 → finish)
+
+1. Install ArgoCD on k3s
+2. Expose ArgoCD UI (port-forward or NodePort)
+3. Get admin creds and secure the account
+4. Create Git repo layout and commit manifests (no domain ingress)
+5. Create & apply ArgoCD `Application` CRD pointing to your repo
+6. Verify app sync / pods / ingress (HTTP)
+7. Short troubleshooting checklist
+
+---
+
+# Argo CD Implemention for Continous Delivery (CD)  
+
+---
+
+## 1) Install ArgoCD (run from your laptop where `kubectl` points to k3s)
+
+```bash
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+# wait for pods to be ready
+kubectl rollout status deploy/argocd-server -n argocd --timeout=120s
+kubectl get pods -n argocd
+```
+
+You should see pods: `argocd-server`, `argocd-repo-server`, `argocd-application-controller`, `argocd-dex-server`, etc.
+
+---
+
+## 2) Expose ArgoCD UI (pick one)
+
+### NodePort (accessible via server IP)
+
+```bash
+kubectl -n argocd patch svc argocd-server -p '{"spec": {"type": "NodePort"}}'
+kubectl get svc -n argocd argocd-server -o yaml  # note nodePort under ports
+# then open https://<SERVER_IP>:<NODEPORT>
+```
+
+(Port-forward is recommended until you have a domain/TLS.)
+
+---
+
+## 3) Get admin password & change it
+
+Initial password:
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
+```
+
+Login to UI: `admin` / `<password>`.
+**Change the password** in UI → settings → account, or use `argocd` CLI.
+
+(Optional: install `argocd` CLI on WSL and login)
+
+```bash
+# download CLI (example for linux amd64)
+curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+chmod +x argocd && sudo mv argocd /usr/local/bin/
+argocd login localhost:8080 --insecure --username admin --password <password>
+argocd account update-password
+```
+
+---
+
+## 4) Create Git repo layout & manifests (no-domain HTTP ingress)
+
+Recommended repo layout:
+
+```
+repo/
+ ├─ app/              # website sources (index.html, Dockerfile)
+ ├─── deploy/ │     
+ │      ├─ deployment.yaml
+ │      ├─ service.yaml
+ │      ├─ ingress.yaml     <-- NO host, HTTP only
+ │      └─ kustomization.yaml
+ └─── .github/workflows/...
+```
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: web
+        image: <DOCKERHUB_USERNAME>/web:latest
+        ports:
+        - containerPort: 80
+```
+
+Example `deploy/base/service.yaml`:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 80
+```
+
+Example **no-domain** `deploy/base/ingress.yaml`:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 80
+```
+
+`deploy/base/kustomization.yaml`:
+
+```yaml
+resources:
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+```
+
+Commit & push these files to your repo `main` branch.
+
+---
+
+## 5) Create ArgoCD Application CR to point to the `deploy/base` path
+
+Create `argocd/application.yaml` (or apply from laptop directly):
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/<YOUR_GITHUB_USERNAME>/<REPO>.git'
+    targetRevision: main
+    path: deploy/base
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+```
+
+Apply it:
+
+```bash
+kubectl apply -f argocd/application.yaml -n argocd
+```
+
+---
+
+## 6) Verify ArgoCD deploy & app health
+
+Web UI: open ArgoCD (port-forward or NodePort) → you should see `web-app`.
+CLI checks (if using `argocd` CLI):
+
+```bash
+argocd app list
+argocd app get web-app
+argocd app wait web-app --health --timeout 120
+argocd app sync web-app   # force sync if not automatically synced
+```
+
+kubectl checks:
+
+```bash
+kubectl get all -l app=web -n default
+kubectl get ingress -n default
+kubectl describe ingress web -n default
+kubectl get pods -n default -w
+```
+
+Access the site (no domain):
+
+* If ingress controller is on the same server IP and listens on 80: `http://<SERVER_IP>/`
+* If working locally with port-forward of ingress-nginx or service, use that port.
+
+Example to port-forward ingress-nginx controller (if single node):
+
+```bash
+kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8081:80
+# then open http://localhost:8081/
+```
+
+---
+
+## 7) Useful post-setup items (make it manageable & efficient)
+
+* **Make ArgoCD auto-sync** (we used `automated` in the CR).
+* **Add health checks** to Deployment (readiness/liveness) for smoother rollouts.
+* **Change admin password** and create user accounts / SSO (dex or external OIDC) for team.
+* **Add repo credentials** if your Git repo is private (Argocd → Settings → Repositories).
+* **Add image update workflow** later (Argo CD Image Updater or GitHub Actions that bumps manifests).
+* **Create Project(s)** in ArgoCD if you plan multi-app RBAC.
+* **Use Kustomize overlays** for dev/prod later.
+
+---
+
+## 8) Quick troubleshooting checklist
+
+* ArgoCD pods pending or crash:
+
+  ```bash
+  kubectl get pods -n argocd
+  kubectl logs <pod-name> -n argocd
+  ```
+* Application stuck `OutOfSync`:
+
+  * Check events in ArgoCD UI → reason why (bad manifest, RBAC, missing CRD)
+  * `kubectl describe application web-app -n argocd`
+* Ingress returns 404:
+
+  * `kubectl get ingress` -> check rules
+  * `kubectl -n ingress-nginx get pods` (controller must be running)
+  * `kubectl logs <ingress-pod> -n ingress-nginx`
+* Image not pulled:
+
+  * Ensure image exists at Docker Hub and image name/tag matches manifest.
+  * If private registry, add imagePullSecrets or configure registry credential in k8s.
+
+---
+
+
