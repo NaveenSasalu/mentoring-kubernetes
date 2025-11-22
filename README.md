@@ -473,17 +473,18 @@ kubectl get pods,svc,ingress
 # Quick plan
 
 1. Install ArgoCD on k3s
-2. Expose ArgoCD UI (port-forward or NodePort)
+2. Expose ArgoCD UI (NodePort)
 3. Get admin creds and secure the account
 4. Create Git repo layout and commit manifests (no domain ingress)
 5. Create & apply ArgoCD `Application` CRD pointing to your repo
 6. Verify app sync / pods / ingress (HTTP)
 7. Short troubleshooting checklist
+8. Quick troubleshooting checklist
 
 ---
 <details>
 <summary><strong>
-## 1) Install ArgoCD (run from your laptop where `kubectl` points to k3s)
+1) Install ArgoCD (run from your laptop where `kubectl` points to k3s)
 </strong></summary>
 ```bash
 kubectl create namespace argocd
@@ -500,8 +501,7 @@ You should see pods: `argocd-server`, `argocd-repo-server`, `argocd-application-
 
 <details>
 <summary><strong>
-## 2) Expose ArgoCD UI 
-### NodePort (accessible via server IP)
+2) Expose ArgoCD UI (NodePort -accessible via server IP)
 </strong></summary>
 
 ```bash
@@ -517,7 +517,7 @@ kubectl get svc -n argocd argocd-server -o yaml  # note nodePort under ports
 
 <details>
 <summary><strong>
-## 3) Get admin password & change it
+3) Get admin password & change it
 </summary></strong>
 
 Initial password:
@@ -544,7 +544,7 @@ argocd account update-password
 
 <details>
 <summary><strong>
-## 4) Create Git repo layout & manifests (no-domain HTTP ingress)
+4) Create Git repo layout & manifests (no-domain HTTP ingress)
 </summary></strong>
 
 Recommended repo layout:
@@ -637,7 +637,7 @@ Commit & push these files to your repo `main` branch.
 
 <details>
 <summary><strong>
-## 5) Create ArgoCD Application CR to point to the `deploy/` path
+5) Create ArgoCD Application CR to point to the `deploy/` path
 </summary></strong>
 
 Create `argocd/application.yaml` (or apply from laptop directly):
@@ -676,7 +676,7 @@ kubectl apply -f argocd/application.yaml -n argocd
 
 <details>
 <summary><strong>
-## 6) Verify ArgoCD deploy & app health
+6) Verify ArgoCD deploy & app health
 </summary></strong>
 
 Web UI: open ArgoCD (port-forward or NodePort) → you should see `web-app`.
@@ -713,7 +713,7 @@ kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8081:80
 </details>
 <details>
 <summary><strong>
-## 7) Useful post-setup items (make it manageable & efficient)
+7) Useful post-setup items (make it manageable & efficient)
 </summary></strong>
 
 * **Make ArgoCD auto-sync** (we used `automated` in the CR).
@@ -729,7 +729,7 @@ kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8081:80
 
 <details>
 <summary><strong>
-## 8) Quick troubleshooting checklist
+8) Quick troubleshooting checklist
 </summary></strong>
 * ArgoCD pods pending or crash:
 
